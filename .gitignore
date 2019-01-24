@@ -26,6 +26,12 @@
 *.a
 *.lib
 
+# Debugging Symbols
+*.ilk
+*.pdb
+*.iobj
+*.ipdb
+
 # Executables
 *.exe
 *.out
