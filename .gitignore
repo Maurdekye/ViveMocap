@@ -36,3 +36,10 @@
 *.exe
 *.out
 *.app
+
+animdata
+.vs
+x64
+
+*.log
+*.tlog

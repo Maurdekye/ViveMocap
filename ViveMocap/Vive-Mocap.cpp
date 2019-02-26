@@ -7,17 +7,19 @@
 #define RAD_2_DEG (180.0/3.14159)
 #define TIMESTR_BUFSIZE 1024
 #define MAX_TIME 1800
-#define RECORD_HZ 60
 
 using namespace vr;
+
+int record_hz;
 
 typedef struct {
 	double x;
 	double y;
 	double z;
-	double pitch;
-	double yaw;
-	double roll;
+	double qw;
+	double qx;
+	double qy;
+	double qz;
 	double time;
 
 } six_dof_moment;
@@ -33,9 +35,35 @@ six_dof_moment pose_to_six_dof_moment(TrackedDevicePose_t pose, double time) {
 	moment.x = mat.m[0][3];
 	moment.y = mat.m[1][3];
 	moment.z = mat.m[2][3];
-	moment.pitch = atan2(mat.m[1][2], mat.m[2][2]) * RAD_2_DEG;
-	moment.yaw = atan2(-mat.m[0][2], sqrt(mat.m[1][2]*mat.m[1][2] + mat.m[2][2]*mat.m[2][2])) * RAD_2_DEG * 2;
-	moment.roll = atan2(mat.m[0][1], mat.m[0][0]) * RAD_2_DEG;
+
+	double tr = mat.m[0][0] + mat.m[1][1] + mat.m[2][2];
+
+	if (tr > 0) {
+		double S = sqrt(tr + 1.0) * 2;
+		moment.qw = 0.25 * S;
+		moment.qx = (mat.m[2][1] - mat.m[1][2]) / S;
+		moment.qy = (mat.m[0][2] - mat.m[2][0]) / S;
+		moment.qz = (mat.m[1][0] - mat.m[0][1]) / S;
+	} else if ((mat.m[0][0] > mat.m[1][1]) && (mat.m[0][0] > mat.m[2][2])) {
+		double S = sqrt(1.0 + mat.m[0][0] - mat.m[1][1] - mat.m[2][2]) * 2;
+		moment.qw = (mat.m[2][1] - mat.m[1][2]) / S;
+		moment.qx = 0.25 * S;
+		moment.qy = (mat.m[0][1] + mat.m[1][0]) / S;
+		moment.qz = (mat.m[0][2] + mat.m[2][0]) / S;
+	} else if (mat.m[1][1] > mat.m[2][2]) {
+		double S = sqrt(1.0 + mat.m[1][1] - mat.m[0][0] - mat.m[2][2]) * 2;
+		moment.qw = (mat.m[0][2] - mat.m[2][0]) / S;
+		moment.qx = (mat.m[0][1] + mat.m[1][0]) / S;
+		moment.qy = 0.25 * S;
+		moment.qz = (mat.m[1][2] + mat.m[2][1]) / S;
+	} else {
+		double S = sqrt(1.0 + mat.m[2][2] - mat.m[0][0] - mat.m[1][1]) * 2;
+		moment.qw = (mat.m[1][0] - mat.m[0][1]) / S;
+		moment.qx = (mat.m[0][2] + mat.m[2][0]) / S;
+		moment.qy = (mat.m[1][2] + mat.m[2][1]) / S;
+		moment.qz = 0.25 * S;
+	}
+
 	moment.time = time;
 
 	return moment;
@@ -44,7 +72,7 @@ six_dof_moment pose_to_six_dof_moment(TrackedDevicePose_t pose, double time) {
 std::string serialize_moment(six_dof_moment moment) {
 	std::ostringstream s;
 	s << moment.x << " " << moment.y << " " << moment.z << " ";
-	s << moment.pitch << " " << moment.yaw << " " << moment.roll << " ";
+	s << moment.qw << " " << moment.qx << " " << moment.qy << " " << moment.qz << " ";
 	s << moment.time;
 
 	return s.str();
@@ -79,7 +107,7 @@ void event_loop(IVRSystem* VR) {
 		if (activeDevice != k_unTrackedDeviceIndexInvalid) {
 			double curtime = get_time() - initialTime;
 			if (curtime >= nextPoll) {
-				nextPoll += 1.0 / RECORD_HZ;
+				nextPoll += 1.0 / record_hz;
 				TrackedDevicePose_t devicePose[k_unMaxTrackedDeviceCount];
 				VR->GetDeviceToAbsoluteTrackingPose(TrackingUniverseStanding, 0, devicePose, k_unMaxTrackedDeviceCount);
 				six_dof_moment m = pose_to_six_dof_moment(devicePose[activeDevice], curtime);
@@ -130,6 +158,15 @@ void event_loop(IVRSystem* VR) {
 	}
 }
 
+void initialize() {
+	do {
+		std::cout << "Please type the polling hz you would like to record at: ";
+		std::cin >> record_hz;
+	} while (record_hz <= 0);
+	std::cout << "Now recording at " << record_hz << " hz.\n";
+	std::cout << "Hold trigger on any connected vive wand to begin recording.\n";
+}
+
 int main() {
 
 	if (!CreateDirectoryA(STOREPATH, NULL) && GetLastError() != ERROR_ALREADY_EXISTS) {
@@ -141,6 +178,7 @@ int main() {
 	IVRSystem* VR = VR_Init(&vrError, EVRApplicationType::VRApplication_Background);
 
 	if (vrError == VRInitError_None) {
+		initialize();
 		event_loop(VR);
 		VR_Shutdown();
 	} else if (vrError == VRInitError_Init_NoServerForBackgroundApp) {
